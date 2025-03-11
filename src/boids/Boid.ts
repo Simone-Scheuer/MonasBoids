@@ -10,14 +10,14 @@ export class Boid {
 
     // Classic Reynolds ranges
     private ranges = {
-        separation: 20,    // Smaller separation for tighter flocks
+        separation: 15,    // Reduced separation range but will use stronger force
         alignment: 50,     // Good range for velocity matching
         cohesion: 50      // Same as alignment for better group formation
     };
 
     // Classic Reynolds weights
     private weights = {
-        separation: 1.5,   // Balanced separation
+        separation: 2.0,   // Increased separation weight
         alignment: 1.0,    // Base alignment
         cohesion: 1.0,    // Equal to alignment for proper flocking
         avoidance: 2.0
@@ -147,8 +147,9 @@ export class Boid {
                     this.mesh.position,
                     other.mesh.position
                 );
-                // Classic inverse square law with moderate strength
-                const strength = 1.5 / (distance * distance);
+                // Enhanced separation force
+                // Use cubic inverse for very strong close-range separation
+                const strength = Math.min(10, 8.0 / Math.pow(distance, 3));
                 diff.normalize().multiplyScalar(strength);
                 steering.add(diff);
                 count++;
@@ -158,7 +159,9 @@ export class Boid {
         if (count > 0) {
             steering.divideScalar(count);
             if (steering.length() > 0) {
-                steering.normalize().multiplyScalar(this.maxSpeed);
+                // Apply stronger steering for separation
+                const desiredSpeed = Math.min(this.maxSpeed * 1.5, steering.length() * 2);
+                steering.normalize().multiplyScalar(desiredSpeed);
                 steering.sub(this.velocity);
             }
         }
@@ -262,7 +265,7 @@ export class Boid {
     public setPerceptionRadius(radius: number): void {
         console.log('Setting perception radius:', radius); // Debug
         const scale = radius / this.ranges.cohesion;
-        this.ranges.separation = 20 * scale;
+        this.ranges.separation = 15 * scale;
         this.ranges.alignment = 50 * scale;
         this.ranges.cohesion = radius;
     }
