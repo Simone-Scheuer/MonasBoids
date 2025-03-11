@@ -100,7 +100,8 @@ export class Octree {
         // Make sure the octree is large enough to contain all boids
         const maxDim = Math.max(size.x, size.y, size.z);
         const uniformSize = new THREE.Vector3(maxDim, maxDim, maxDim);
-        this.root = new OctreeNode(center, uniformSize);
+        // Ensure center is at origin for proper space division
+        this.root = new OctreeNode(new THREE.Vector3(0, 0, 0), uniformSize);
     }
 
     public insert(boid: Boid): void {
@@ -109,11 +110,20 @@ export class Octree {
 
     public findNeighbors(boid: Boid, radius: number): Boid[] {
         const found: Boid[] = [];
-        const searchSphere = new THREE.Sphere(boid.mesh.position, radius);
+        // Create a slightly larger search sphere to ensure we don't miss edge cases
+        const searchSphere = new THREE.Sphere(
+            boid.mesh.position.clone(),
+            radius * 1.1  // Add 10% to radius to catch edge cases
+        );
         this.root.queryRange(searchSphere, found);
 
-        // Remove self from neighbors
-        return found.filter(other => other !== boid);
+        // Remove self from neighbors and sort by distance for better cohesion
+        return found
+            .filter(other => other !== boid)
+            .sort((a, b) =>
+                a.mesh.position.distanceTo(boid.mesh.position) -
+                b.mesh.position.distanceTo(boid.mesh.position)
+            );
     }
 
     public clear(): void {

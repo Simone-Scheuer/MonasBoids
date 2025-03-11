@@ -5,21 +5,21 @@ export class Boid {
     public velocity: THREE.Vector3;
     public acceleration: THREE.Vector3;
     private maxSpeed: number = 2.0;
-    private maxForce: number = 0.05;  // Reduced for smoother steering
+    private maxForce: number = 0.05;
     private minSpeed: number = 0.5;
 
-    // Classic Reynolds ranges
+    // Adjusted ranges for better physical separation
     private ranges = {
-        separation: 15,    // Reduced separation range but will use stronger force
-        alignment: 50,     // Good range for velocity matching
-        cohesion: 50      // Same as alignment for better group formation
+        separation: 25,     // Increased for physical size consideration
+        alignment: 75,      // Keep alignment range
+        cohesion: 100      // Keep cohesion range
     };
 
-    // Classic Reynolds weights
+    // Adjusted weights for better physical separation
     private weights = {
-        separation: 2.0,   // Increased separation weight
-        alignment: 1.0,    // Base alignment
-        cohesion: 1.0,    // Equal to alignment for proper flocking
+        separation: 2.0,    // Increased for stronger physical separation
+        alignment: 1.3,     // Keep alignment weight
+        cohesion: 0.8,     // Slightly reduced to prevent over-clustering
         avoidance: 2.0
     };
 
@@ -73,8 +73,9 @@ export class Boid {
         this.acceleration.add(cohesion);
         this.acceleration.add(avoidance);
 
-        // Only clamp the final combined acceleration
-        this.acceleration.clampLength(0, this.maxForce);
+        // Increase max force when separation is high for emergency avoidance
+        const maxForce = separation.length() > 1.5 ? this.maxForce * 2.0 : this.maxForce;
+        this.acceleration.clampLength(0, maxForce);
 
         // Update velocity with acceleration
         this.velocity.add(this.acceleration);
@@ -137,19 +138,44 @@ export class Boid {
     private separate(boids: Boid[]): THREE.Vector3 {
         const steering = new THREE.Vector3();
         let count = 0;
+        const physicalRadius = this.mesh.scale.x * 1.0; // Use actual boid size for collision
+        const lookAheadTime = 0.5; // Predict position 0.5 seconds ahead
 
         for (const other of boids) {
             if (other === this) continue;
 
             const distance = this.mesh.position.distanceTo(other.mesh.position);
-            if (distance > 0 && distance < this.ranges.separation) {
+            const combinedRadius = physicalRadius + (other.mesh.scale.x * 1.0);
+
+            // Calculate future positions
+            const myFuturePos = this.mesh.position.clone().add(this.velocity.clone().multiplyScalar(lookAheadTime));
+            const otherFuturePos = other.mesh.position.clone().add(other.velocity.clone().multiplyScalar(lookAheadTime));
+            const futureDistance = myFuturePos.distanceTo(otherFuturePos);
+
+            // Check both current and predicted collisions
+            if (distance < this.ranges.separation || futureDistance < combinedRadius * 2) {
                 const diff = new THREE.Vector3().subVectors(
                     this.mesh.position,
                     other.mesh.position
                 );
-                // Enhanced separation force
-                // Use cubic inverse for very strong close-range separation
-                const strength = Math.min(10, 8.0 / Math.pow(distance, 3));
+
+                // Calculate separation force based on both current and predicted positions
+                let strength;
+                if (distance < combinedRadius * 1.2) {
+                    // Emergency separation for immediate collisions
+                    strength = Math.min(20, 10.0 / (distance * distance));
+                } else if (futureDistance < combinedRadius * 2) {
+                    // Strong predictive avoidance
+                    strength = Math.min(15, 5.0 / futureDistance);
+                } else {
+                    // Normal separation for comfortable spacing
+                    strength = Math.min(8, 2.0 / (distance * distance));
+                }
+
+                // Add velocity difference to avoid boids moving in same direction
+                const velDiff = new THREE.Vector3().subVectors(other.velocity, this.velocity);
+                diff.sub(velDiff.multiplyScalar(0.1)); // Small influence from velocity difference
+
                 diff.normalize().multiplyScalar(strength);
                 steering.add(diff);
                 count++;
@@ -159,10 +185,15 @@ export class Boid {
         if (count > 0) {
             steering.divideScalar(count);
             if (steering.length() > 0) {
-                // Apply stronger steering for separation
-                const desiredSpeed = Math.min(this.maxSpeed * 1.5, steering.length() * 2);
+                // Stronger response when multiple neighbors
+                const desiredSpeed = Math.min(this.maxSpeed * 2.0, steering.length() * 2);
                 steering.normalize().multiplyScalar(desiredSpeed);
                 steering.sub(this.velocity);
+
+                // Additional boost for multiple close neighbors
+                if (count > 2) {  // Reduced threshold for earlier response
+                    steering.multiplyScalar(1.5);
+                }
             }
         }
 
@@ -173,21 +204,23 @@ export class Boid {
         const steering = new THREE.Vector3();
         let count = 0;
         const sum = new THREE.Vector3();
+        let totalWeight = 0;
 
         for (const other of boids) {
             if (other === this) continue;
 
             const distance = this.mesh.position.distanceTo(other.mesh.position);
             if (distance < this.ranges.alignment) {
-                // Use full velocity for proper speed matching
-                sum.add(other.velocity);
+                // Weight by distance - closer boids have more influence
+                const weight = 1 - (distance / this.ranges.alignment);
+                sum.add(other.velocity.clone().multiplyScalar(weight));
+                totalWeight += weight;
                 count++;
             }
         }
 
         if (count > 0) {
-            sum.divideScalar(count);
-            // Classic Reynolds steering
+            sum.divideScalar(totalWeight);  // Use weighted average
             sum.normalize().multiplyScalar(this.maxSpeed);
             steering.subVectors(sum, this.velocity);
         }
@@ -199,22 +232,40 @@ export class Boid {
         const steering = new THREE.Vector3();
         let count = 0;
         const center = new THREE.Vector3();
+        let totalWeight = 0;
+        const physicalRadius = this.mesh.scale.x * 1.0;
 
         for (const other of boids) {
             if (other === this) continue;
 
             const distance = this.mesh.position.distanceTo(other.mesh.position);
             if (distance < this.ranges.cohesion) {
-                // Simple position averaging for center of mass
-                center.add(other.mesh.position);
+                // Reduce cohesion when physically close
+                let weight = Math.max(0.2, 1 - (distance / this.ranges.cohesion));
+
+                // Significantly reduce cohesion when near physical collision
+                const combinedRadius = physicalRadius + (other.mesh.scale.x * 1.0);
+                if (distance < combinedRadius * 2) {
+                    weight *= (distance / (combinedRadius * 2));
+                }
+
+                center.add(other.mesh.position.clone().multiplyScalar(weight));
+                totalWeight += weight;
                 count++;
             }
         }
 
         if (count > 0) {
-            center.divideScalar(count);
-            // Classic Reynolds seek behavior
-            return this.seek(center);
+            center.divideScalar(totalWeight);
+            const desired = new THREE.Vector3().subVectors(center, this.mesh.position);
+            const distance = desired.length();
+
+            if (distance > 0) {
+                // Reduced cohesion effect at closer distances
+                const speed = this.maxSpeed * Math.min(0.7, distance / (this.ranges.cohesion * 0.5));
+                desired.normalize().multiplyScalar(speed);
+                steering.subVectors(desired, this.velocity);
+            }
         }
 
         return steering;
@@ -263,16 +314,24 @@ export class Boid {
     }
 
     public setPerceptionRadius(radius: number): void {
-        console.log('Setting perception radius:', radius); // Debug
+        console.log('Setting perception radius:', radius);
         const scale = radius / this.ranges.cohesion;
-        this.ranges.separation = 15 * scale;
-        this.ranges.alignment = 50 * scale;
+        this.ranges.separation = 25 * scale;  // Update to match new separation range
+        this.ranges.alignment = 75 * scale;
         this.ranges.cohesion = radius;
     }
 
     public setWeight(behavior: 'separation' | 'alignment' | 'cohesion' | 'avoidance', weight: number): void {
-        console.log(`Setting ${behavior} weight to ${weight}`); // Debug
+        console.log(`Setting ${behavior} weight to ${weight}`);
+        // Ensure weight is a valid number
+        if (isNaN(weight) || weight < 0) {
+            console.warn(`Invalid weight value for ${behavior}: ${weight}`);
+            return;
+        }
         this.weights[behavior] = weight;
+
+        // Log current weights for debugging
+        console.log('Current weights:', { ...this.weights });
     }
 
     public getWeight(behavior: 'separation' | 'alignment' | 'cohesion' | 'avoidance'): number {

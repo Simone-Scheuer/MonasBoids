@@ -7,6 +7,7 @@ export class Flock {
     private octree: Octree;
     private obstacles: THREE.Mesh[] = [];
     private scene: THREE.Scene;
+    private boidSize: number = 2.0;
     private bounds = {
         width: 400,
         height: 400,
@@ -40,6 +41,7 @@ export class Flock {
             );
 
             const boid = new Boid(position);
+            boid.mesh.scale.setScalar(this.boidSize); // Apply current boid size
             this.boids.push(boid);
             this.scene.add(boid.mesh);
         }
@@ -104,23 +106,64 @@ export class Flock {
     }
 
     public setWeight(behavior: 'separation' | 'alignment' | 'cohesion' | 'avoidance', weight: number): void {
-        console.log(`Setting ${behavior} weight to ${weight}`);
+        console.log(`Flock: Setting ${behavior} weight to ${weight}`);
+        // Validate weight
+        if (isNaN(weight) || weight < 0) {
+            console.warn(`Invalid weight value for ${behavior}: ${weight}`);
+            return;
+        }
+
+        // Apply to all boids
+        let appliedCount = 0;
         for (const boid of this.boids) {
             boid.setWeight(behavior, weight);
+            appliedCount++;
         }
+
+        // Verify application
+        console.log(`Applied ${behavior} weight ${weight} to ${appliedCount} boids`);
     }
 
     public setMaxSpeed(speed: number): void {
-        console.log(`Setting max speed to ${speed}`);
+        console.log(`Flock: Setting max speed to ${speed}`);
+        if (isNaN(speed) || speed <= 0) {
+            console.warn(`Invalid speed value: ${speed}`);
+            return;
+        }
+
+        let appliedCount = 0;
         for (const boid of this.boids) {
             boid.setMaxSpeed(speed);
+            appliedCount++;
         }
+        console.log(`Applied max speed ${speed} to ${appliedCount} boids`);
     }
 
     public setPerceptionRadius(radius: number): void {
-        console.log(`Setting perception radius to ${radius}`);
+        console.log(`Flock: Setting perception radius to ${radius}`);
+        if (isNaN(radius) || radius <= 0) {
+            console.warn(`Invalid radius value: ${radius}`);
+            return;
+        }
+
+        let appliedCount = 0;
         for (const boid of this.boids) {
             boid.setPerceptionRadius(radius);
+            appliedCount++;
         }
+        console.log(`Applied perception radius ${radius} to ${appliedCount} boids`);
+    }
+
+    public setBoidSize(size: number) {
+        console.log(`Setting boid size to ${size}`);
+        this.boidSize = size;
+        // Update all existing boids
+        for (const boid of this.boids) {
+            boid.mesh.scale.setScalar(size);
+        }
+    }
+
+    public getBoidSize(): number {
+        return this.boidSize;
     }
 } 
